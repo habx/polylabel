@@ -2,6 +2,8 @@
 
 var Queue = require('tinyqueue');
 
+if (Queue.default) Queue = Queue.default; // temporary webpack fix
+
 module.exports = polylabel;
 module.exports.default = polylabel;
 
@@ -42,10 +44,14 @@ function polylabel(polygon, precision, debug) {
     var cellSize = Math.min(width, height);
     var h = cellSize / 2;
 
-    if (cellSize === 0) return [minX, minY];
+    if (cellSize === 0) {
+        var degeneratePoleOfInaccessibility = [minX, minY];
+        degeneratePoleOfInaccessibility.distance = 0;
+        return degeneratePoleOfInaccessibility;
+    }
 
     // a priority queue of cells in order of their "potential" (max distance to polygon)
-    var cellQueue = new Queue(null, compareMax);
+    var cellQueue = new Queue(undefined, compareMax);
 
     var centroid = getCentroid(polygon);
     var fitnessFunc = getFitnessFunc(centroid, [width, height]);
@@ -60,6 +66,11 @@ function polylabel(polygon, precision, debug) {
     // take centroid as the first best guess
     var bestCell = new Cell(centroid[0], centroid[1], 0, polygon, fitnessFunc);
 
+
+    // second guess: bounding box centroid
+    var bboxCell = new Cell(minX + width / 2, minY + height / 2, 0, polygon, fitnessFunc);
+    if (bboxCell.d > bestCell.d) bestCell = bboxCell;
+
     var numProbes = cellQueue.length;
 
     while (cellQueue.length) {
@@ -69,7 +80,7 @@ function polylabel(polygon, precision, debug) {
         // update the best cell if we found a better one
         if (cell.fitness > bestCell.fitness) {
             bestCell = cell;
-            if (debug) console.log('found best %d after %d probes', Math.round(1e4 * cell.d) / 1e4, numProbes);
+            if (debug) console.log('found best %f after %d probes', Math.round(1e4 * cell.d) / 1e4, numProbes);
         }
 
         // do not drill down further if there's no chance of a better solution
@@ -89,7 +100,9 @@ function polylabel(polygon, precision, debug) {
         console.log('best distance: ' + bestCell.d);
     }
 
-    return [bestCell.x, bestCell.y];
+    var poleOfInaccessibility = [bestCell.x, bestCell.y];
+    poleOfInaccessibility.distance = bestCell.d;
+    return poleOfInaccessibility;
 }
 
 function compareMax(a, b) {
@@ -124,7 +137,7 @@ function pointToPolygonDist(x, y, polygon) {
         }
     }
 
-    return (inside ? 1 : -1) * Math.sqrt(minDistSq);
+    return minDistSq === 0 ? 0 : (inside ? 1 : -1) * Math.sqrt(minDistSq);
 }
 
 // get polygon centroid
